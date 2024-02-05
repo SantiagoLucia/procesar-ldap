@@ -5,6 +5,7 @@ from string import Template
 from pathlib import Path
 import re
 import sys
+from glob import glob
 
 sql = Template(
     """select
@@ -30,49 +31,51 @@ left join track_ged.sade_reparticion sr1 on (sr.ministerio = sr1.id_reparticion)
 left join co_ged.datos_usuario du on (du.usuario = su.nombre_usuario)
 left join co_ged.cargos c on (du.cargo = c.id)  
 where sr1.codigo_reparticion = '$codigo'
+and sr.codigo_reparticion not in ('DIPROMGGP','TESTGDEBA')
 and su.estado_registro = 1
+and sr.estado_registro = 1
+and sr1.estado_registro = 1
 """
 )
 
+export_path = "./export/*.txt"
 
-def main(ldap_file: str, cod_org: str):
-    # path del archivo ldap
-    file_path = Path(ldap_file)
+salida_path = Path("salida")
+
+# expresion regular para obtener el USER
+pattern = re.compile("=(.*?),")
+
+
+def main(cod_org: str):
 
     # todos los usuarios del organismo cod_org
     engine = sqlalchemy.create_engine(CON_URL)
     with engine.connect() as conn:
         query = sqlalchemy.text(sql.substitute(codigo=cod_org))
         usuarios_organismo = pd.read_sql(query, conn)
-
-    # expresion regular para obtener el USER
-    pattern = re.compile("=(.*?),")
-
-    # usuarios con permiso en el archivo ldap
-    usuarios_permiso = [
-        pattern.search(line).group(1)
-        for line in open(file_path).readlines()
-        if line.startswith("dn:")
-    ]
-
-    # me quedo solo con los usuarios que tengan permiso
-    usuarios_org_permiso = usuarios_organismo[
-        usuarios_organismo["nombre_usuario"].isin(usuarios_permiso)
-    ]
-
-    # guardo en el archivo de salida
-    usuarios_org_permiso.to_csv(
-        f"{file_path.stem}.csv",
-        index=False,
-        sep=";",
-        mode="w",
-        header=True,
-        encoding="Windows-1252",
-    )
-
+    
+    for file in glob(export_path):
+        file_path = Path(file)
+        print(f"Procesando {file_path.name}")
+        # usuarios con permiso en el archivo ldap
+        usuarios_permiso = [
+            pattern.search(line).group(1)
+            for line in open(file_path).readlines()
+            if line.startswith("dn:")
+        ]
+        # me quedo solo con los usuarios que tengan permiso
+        usuarios_org_permiso = usuarios_organismo[
+            usuarios_organismo["nombre_usuario"].isin(usuarios_permiso)
+        ]
+        # guardo en el archivo de salida
+        usuarios_org_permiso.to_csv(
+            salida_path / f"{file_path.stem}.csv",
+            index=False,
+            sep=";",
+            mode="w",
+            header=True,
+            encoding="Windows-1252",
+        )
 
 if __name__ == "__main__":
-    main(
-        ldap_file=sys.argv[1],
-        cod_org=sys.argv[2],
-    )
+    main(cod_org=sys.argv[1])
